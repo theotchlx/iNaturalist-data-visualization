@@ -1,0 +1,10 @@
+name: inat_observations_analysis
+title:
+username: theotchlx
+account: theotchlx
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 12295219
+bundleId: 8862710
+url: https://theotchlx.shinyapps.io/inat_observations_analysis/
+version: 1

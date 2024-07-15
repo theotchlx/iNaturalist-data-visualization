@@ -1,0 +1,412 @@
+---
+title: "iNaturalist Observations Analysis"
+author: "TCHILINGUIRIAN Théo"
+date: "2024-06-20"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+---
+
+<center>![Crab spider (Xysticus sp.) and a juvenile Mediterranean Black Widow (Latrodectus tredecimguttatus) at Lac du Salagou, Hérault, Occitanie, France. April 21, 2024. Credits: Julien Tchilinguirian](data/widowandcrab.png)</center>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(treemapify)
+library(knitr)
+
+# Set locale to English for month names
+Sys.setlocale("LC_TIME", "C")
+```
+
+
+```{r load_data, include=FALSE}
+# Load the data
+observations <- read.csv("data/observations.csv")
+```
+
+
+---
+
+# Goal of this Report
+
+This report is an analysis of iNaturalist observations made by one individual. The objective is to uncover patterns and biases in the data that can inform future research and observation strategies. Observations are unevenly distributed depending on the month and the hour of the day, impacting the likelihood of observing certain species. This analysis aims to provide practical insights into observation methods and potential biases.
+
+\pagebreak
+
+# Questions Addressed
+
+- What is the distribution of observations over time?
+- Which species are most frequently observed?
+- How do observations vary by taxonomic group?
+
+## Dataset Overview
+
+The dataset consists of iNaturalist observations by one individual. It includes information such as the species observed, the date and time of the observation, and the taxonomic classification.
+The dataset used can be swapped with a collection of observations made during a mission, or by a group of individuals, to focus the analysis on the event in question.
+
+## General Information about the Dataset
+
+```{r general_numbers}
+# Calculate the number of observations
+num_observations <- nrow(observations)
+
+# Calculate the number of observed species
+num_species <- observations %>% filter(!is.na(scientific_name)) %>% pull(scientific_name) %>% unique() %>% length()
+
+```
+
+This dataset contains `r num_observations` observations on `r num_species` species.
+
+
+### Percentage of Missing Data per Observation Variable
+
+```{r missing_data}
+# Calculate the percentage of missing data for each column/observation variable
+missing_data <- sapply(observations, function(x) mean(is.na(x)) * 100)
+missing_data <- data.frame(Column = names(missing_data), MissingPercentage = missing_data, row.names = NULL)
+
+kable(missing_data, col.names = c("Column/Observation Variable", "Percentage of Missing Data"), digits = 2)
+
+```
+
+
+\pagebreak
+
+## Question 1: Distribution of Observations Over Time
+
+### Statistical Description
+
+- Population: All possible iNaturalist observations.
+- Sample: The dataset of observations by one individual.
+- Variables:
+  - Observed Hour: Categorical variable with 24 modalities (0 to 23 hours).
+  - Observed Month: Categorical variable with 12 modalities (January to December).
+- Objective: To analyze the distribution of observations over different times of the day and months of the year.
+
+### Analysis and Visualization
+
+To understand the temporal distribution of observations, we analyze the data by hour of the day (time of day) and by month.
+
+### Proportion of Observations without Temporal Data
+
+``` {r percentage_missing_hours}
+# Extract hour from time_observed_at
+observations$time_observed_at <- ymd_hms(observations$time_observed_at)
+observations$hour <- hour(observations$time_observed_at)
+
+# Calculate the counts of NA and non-NA values in the hours column
+na_count <- sum(is.na(observations$hour))
+total_count <- nrow(observations)
+na_percentage <- (na_count / total_count) * 100
+non_na_percentage <- 100 - na_percentage
+
+```
+
+Calculations return that approximately `r round(na_percentage, 2)`% of data concerning the hour of the observation is not given.
+
+
+### Distribution of Observations by Time of Day
+
+```{r distri_obs_hour_day}
+# Filter out NA values (to only have hours 0 to 23)
+observations_hours_nomiss <- observations %>% filter(!is.na(hour))
+
+# Number of columns
+num_bins <- length(unique(observations_hours_nomiss$hour))
+
+# Custom colors
+my_colors <- c("lightsteelblue", "steelblue")[1:num_bins %% 2 + 1]
+
+# Plot the distribution of observations by hour
+ggplot(observations_hours_nomiss, aes(x = hour)) +
+  geom_bar(fill = my_colors) +
+  labs(title = "Distribution of Observations by Time of Day",
+       x = "Hour of the Day",
+       y = "Number of Observations") +
+  theme_minimal()
+
+```
+
+
+### Distribution of Observations by Month
+
+``` {r distri_obs_month}
+# Extract month from observed_on
+observations$observed_on <- ymd(observations$observed_on)
+observations$month <- month(observations$observed_on, label = TRUE, abbr = TRUE)
+observations <- observations %>% filter(!is.na(month))
+
+# Number of columns
+num_bins <- length(unique(observations$month))
+
+# Custom color palette
+my_colors <- c("lightsteelblue", "steelblue")[1:num_bins %% 2 + 1]
+
+# Plot the distribution of observations by month
+ggplot(observations, aes(x = month)) +
+  geom_bar(fill = my_colors) +
+  labs(title = "Distribution of Observations by Month",
+       x = "Month",
+       y = "Number of Observations") +
+  theme_minimal()
+
+```
+
+
+## Interpretation
+
+The data shows a clear pattern in the distribution of observations by time of day and by month. Most observations are made around high noon, indicating a potential bias against nocturnal species. Additionally, certain months have higher observation frequencies, which could be due to seasonal availability or observer activity patterns.
+
+
+### Limitations
+
+The missing data for the hour of observation (approximately `r round(na_percentage, 2)`%) limits the completeness of the temporal analysis, however by a negligible margin. Furthermore, the dataset represents observations by only one individual, which may not generalize to a broader population.
+
+
+\pagebreak
+
+## Question 2: Most Frequently Observed Species
+
+### Statistical Description
+
+- Population: All possible species that have been observed on iNaturalist.
+- Sample: The species recorded in the dataset.
+- Variables:
+  - Species Name: Categorical variable representing the known scientific names of species observed.
+  - Observation Count: Numerical variable representing the number of observations for each species.
+- Objective: To identify the species that are most frequently observed in the dataset.
+
+### Analysis and Visualization
+
+To identify the most frequently observed species, we group the data by species and count the number of observations for each.
+
+```{r most_observed_species}
+# Group by species and count the observations
+species_counts <- observations %>%
+  filter(!is.na(scientific_name)) %>%
+  group_by(scientific_name) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# Display the top species in a table
+kable(head(species_counts, 20), col.names = c("Species", "Number of Observations"), digits = 0)
+
+```
+
+
+### Interpretation
+
+The table above lists the top 20 most observed species in the dataset. These species are observed more frequently, indicating either their abundance in the observed area or the observer's preference or ease in identifying them in their environment.  
+
+Representing this data as a table allows for an easy overview of the quantity of observations in the most frequently observed species.
+
+
+### Limitations
+
+This analysis does not account for the observer's potential biases towards certain species, nor does it consider the possibility of misidentifications.
+
+
+\pagebreak
+
+## Question 3: Observations by Taxonomic Group
+
+### Statistical Description
+
+- Population: All taxonomic groups that the observed species belong to.
+- Sample: The taxonomic groups recorded in the dataset.
+- Variables:
+  - Taxon Name: Categorical variable representing the taxonomic group of the species.
+  - Observation Count: Numerical variable representing the number of observations for each taxonomic group.
+- Objective: To understand the distribution of observations across different taxonomic groups.
+
+### Analysis and Visualization
+
+To understand the distribution of observations across different taxonomic groups, we use both a treemap and a pie chart for visualization.
+
+### Distribution by Taxonomic Group (Treemap)
+
+```{r taxon_tree}
+# Prepare treemap data
+taxonomic_data <- observations %>% 
+  filter(!is.na(iconic_taxon_name) & iconic_taxon_name != "") %>% 
+  count(iconic_taxon_name)
+
+# Plot the treemap
+ggplot(taxonomic_data, aes(area = n, fill = iconic_taxon_name, label = iconic_taxon_name)) +
+  geom_treemap() +
+  geom_treemap_text(colour = "white", place = "centre", grow = TRUE) +
+  labs(title = "Distribution of observations by taxonomic group (Treemap)") +  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+The idea to make a treemap diagram came to me while browsing existing R Shiny applications.
+
+
+### Distribution by Taxonomic Group (Pie Chart)
+
+```{r taxon_pie}
+# Calculate percentage for pie chart and reorder levels (so that they are order from largest to thinnest)
+taxonomic_data <- observations %>% 
+  filter(!is.na(iconic_taxon_name) & iconic_taxon_name != "") %>% 
+  count(iconic_taxon_name) %>%
+  mutate(percentage = n / sum(n) * 100,
+    iconic_taxon_name = factor(iconic_taxon_name, levels = iconic_taxon_name[order(-percentage)]))
+
+# Plot the pie!
+ggplot(taxonomic_data, aes(x = "", y = percentage, fill = iconic_taxon_name)) +
+  geom_bar(width = 1, stat = "identity") +
+  coord_polar("y") +
+  labs(title = "Distribution of observations by taxonomic group (Pie Chart)") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank()) +
+  scale_fill_manual(values = scales::hue_pal()(length(unique(taxonomic_data$iconic_taxon_name))),
+                    labels = paste(levels(taxonomic_data$iconic_taxon_name), 
+                     " (", round(taxonomic_data$percentage[order(-taxonomic_data$percentage)], 1), "%)", sep = "")) +
+  guides(fill = guide_legend(title = "Taxon Name"))
+
+```
+
+### Interpretation
+
+Both visualizations highlight the distribution of observations across various taxonomic groups. The treemap provides a quick visual representation of the relative abundance of each group, while the pie chart gives a more precise percentage breakdown alongside the visuals sorted by proportion.
+
+
+### Limitations
+
+Taxonomic identification is subject to the observer's expertise and potential errors. Taxons exist in different levels of precision, so these representations can only serve as imprecise overviews, unless the taxons are precisely identified before the dataset analysis.
+
+
+\pagebreak
+
+## Additional Analysis: Observations of Linyphiidae by Time of Day
+
+Linyphiidae, a family of spiders, is the most observed family of spiders (Arachnida) in the dataset. Analyzing their observations by time of day provides further insights into observation patterns.
+
+```{r obs_by_species_by_ToD}
+# Select species for analysis
+selected_species <- "Linyphiidae"  # Replace with the desired species name
+
+# Filter data for the selected species
+species_data <- observations %>% filter(scientific_name == selected_species)
+
+# Determine the number of bins
+num_bins <- length(unique(species_data$hour))
+
+# Define a custom color palette
+my_colors <- c("lightsteelblue", "steelblue")[1:num_bins %% 2 + 1]
+
+# Plot the between time of day and species observations
+ggplot(species_data, aes(x = hour)) +
+  geom_histogram(binwidth = 1, fill = my_colors) +
+  labs(title = paste("Observations of", selected_species, "by Time of Day"),
+       # x = "Hour of the Day",
+       y = "Number of Observations") +
+  scale_x_continuous(breaks = 0:23, labels = sprintf("%02d", 0:23)) +
+  theme_minimal()
+
+```
+
+Number of observations for `r selected_species` : `r nrow(species_data)`.
+
+### Interpretation
+
+Linyphiidae is a family of spiders (order Aranea, class Arachnida). It is the most present family of spiders in the dataset.
+
+The histogram indicates the time of day when Linyphiidae observations are most frequent. This pattern can inform the best times for observing these spiders.
+
+This analysis can be considered an answer to the three last questions in one, focusing on one particular family of spides of the dataset.
+
+
+
+## Additional Analysis: Quantity of Observations by Month, Week, and Day between 2020 and 2024
+
+This diagram is experimental and should not be used for research purposes.
+
+``` {r time_granularity_graph, message=FALSE, warning=FALSE}
+
+# Aggregate data by day
+observations <- observations %>% 
+  mutate(day = floor_date(observed_on, "day"))
+
+# Summarize counts by day
+daily_data <- observations %>% group_by(day) %>% summarise(count = n())
+
+# Summarize counts by week and month based on daily data to make sure that it fits in the range
+weekly_data <- daily_data %>% 
+  mutate(week = floor_date(day, "week")) %>% 
+  group_by(week) %>% 
+  summarise(count = sum(count))
+
+monthly_data <- daily_data %>% 
+  mutate(month = floor_date(day, "month")) %>% 
+  group_by(month) %>% 
+  summarise(count = sum(count))
+
+# Plot the data
+ggplot() +
+  geom_col(data = monthly_data, aes(x = month, y = count), fill = "steelblue", alpha = 0.7) +
+  geom_col(data = weekly_data, aes(x = week, y = count), fill = "darkorange", alpha = 0.5) +
+  geom_line(data = daily_data, aes(x = day, y = count), color = "darkred") +
+  labs(title = "Quantity of Observations by Month, Week, and Day from 2020 to 2024",
+       x = "Date",
+       y = "Number of Observations") +
+  scale_x_date(limits = as.Date(c("2020-01-01", "2023-12-31")), date_labels = "%Y-%m-%d") +
+  theme_minimal()
+```
+
+### Interpretation
+
+This presentation of the distribution of observations by month, week and day shows a handsome overview of the work done over years.
+
+It may prove useful to compare the work between years, while still retaining useful levels of granularity.
+
+
+### Limitations
+
+I have had issues with this graph, either from the data flooring, or from the presentation in columns, but some data does not seem to fit in the correct bars.
+
+Due to these complications, this diagram is experimental and should not be used for research purposes.
+
+
+\pagebreak
+
+## Conclusion
+
+This report provides a detailed analysis of iNaturalist observations, focusing on temporal distribution, species frequency, and taxonomic group distribution. The findings highlight potential biases and patterns that can guide future research, observation and identification efforts.  
+
+### Difficulties
+
+I encountered a few challenges while studying this dataset. I studied possible correlations between the variables in the dataset ; I either found completely uncorrelated data (null coefficient) or non-linear correlations that I didn't have the skills to study.
+
+Moreover, efforts to make a map of the distribution of observations using the dataset coordinates (longitude, latitude, and positional accuracy) were halted by Google Maps API needing a non-free API key ; and the other possible mapping services not being available at the time of writing due to maintenance or inoperability.
+
+
+### Future Works
+
+- Future analyses to incorporate data from multiple observers to enhance generalizability.
+- Efforts to reduce missing data.
+- Further studies could explore additional factors influencing observation patterns, such as weather conditions and habitat types or surrounding environment.
+
+
+### Interesting links and sources
+
+The following is a collection of links to websites or databases I discovered or was introduced to, that inspired the subject for this project.
+
+- iNaturalist: https://www.inaturalist.org/
+- GBIF: https://www.gbif.org/
+- Titan Database: http://titan.gbif.fr/
+- World Arachnida Catalog (WAC): https://wac.nmbe.ch/
+- World Spider Catalog (WSC): https://wsc.nmbe.ch/
+- Aranea (spider identification): https://araneae.nmbe.ch/
+- The Scorpion Files (scorpion identification): https://www.ntnu.no/ub/scorpion-files/
+
