@@ -5,3 +5,5 @@ Contains an RMarkDown report and Shiny application hosting plots on statistics b
 
 rsconnect::deployApp('do3-dataviz/TP/soluces/app', appName = "inat_observations_analysis")
 
+## Link to the deployed Shiny app
+https://theotchlx.shinyapps.io/inat_observations_analysis/
